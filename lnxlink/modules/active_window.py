@@ -3,9 +3,10 @@
 import os
 import json
 import logging
+from shutil import which
 from jeepney import DBusAddress, new_method_call
 from jeepney.io.blocking import open_dbus_connection
-from lnxlink.modules.scripts.helpers import import_install_package, get_display_variable
+from lnxlink.modules.scripts.helpers import syscommand, import_install_package, get_display_variable
 
 logger = logging.getLogger("lnxlink")
 
@@ -52,6 +53,12 @@ class Addon:
 
             self.get_window = self._get_wayland_gnome
 
+        elif session_type == "wayland" and "sway" in desktop_env:
+            if which("swaymsg") is None:
+                raise SystemError("System command 'swaymsg' not found")
+
+            self.get_window = self._get_wayland_sway
+
         else:
             raise SystemError(f"Session type '{session_type}' not supported")
 
@@ -94,5 +101,35 @@ class Addon:
                 data = json.loads(json_str)
                 return data.get("focused_window_title")
         except Exception as err:
-            logger.debug("Error getting Wayland window: %s", err)
+            logger.debug("Error getting Gnome Wayland window: %s", err)
+        return None
+
+    def _get_wayland_sway(self):
+        try:
+            stdout, _, _ = syscommand("swaymsg -t get_tree")
+            cmd_json = json.loads(stdout)
+            for output in cmd_json.get("nodes", []):
+                for workspace in output.get("nodes", []):
+                    result = self._sway_walk_tree(workspace)
+                    if result is not None:
+                        return result
+        except Exception as err:
+            logger.debug("Error getting Sway Wayland window: %s", err)
+        return None
+
+    def _sway_walk_tree(self, node):
+        # We only care about actual windows, not splits/tabs/etc
+        if ("window_properties" in node or "app_id" in node) and node.get("focused"):
+            return node.get("name")
+
+        if "nodes" in node:
+            for child in node.get("nodes", []):
+                result = self._sway_walk_tree(child)
+                if result is not None:
+                    return result
+            for child in node.get("floating_nodes", []):
+                result = self._sway_walk_tree(child)
+                if result is not None:
+                    return result
+
         return None

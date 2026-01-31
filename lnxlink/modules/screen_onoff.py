@@ -2,6 +2,7 @@
 import re
 import os
 import logging
+import json
 from shutil import which
 from jeepney import DBusAddress, new_method_call
 from jeepney.io.blocking import open_dbus_connection
@@ -34,6 +35,11 @@ class Addon:
             )
             self.control_screen = self._control_wayland_gnome
             self.get_screen_status = self._get_wayland_gnome_status
+        elif session_type == "wayland" and "sway" in desktop_env:
+            if which("swaymsg") is None:
+                raise SystemError("System command 'swaymsg' not found")
+            self.control_screen = self._control_wayland_sway
+            self.get_screen_status = self._get_wayland_sway_status
         else:
             raise SystemError(f"Session type '{session_type}' not supported")
 
@@ -82,7 +88,7 @@ class Addon:
             # GetActive returns True if the screensaver is active (Screen is OFF)
             return "OFF" if reply.body[0] else "ON"
         except Exception as err:
-            logger.error("Error getting Wayland status: %s", err)
+            logger.error("Error getting Gnome Wayland status: %s", err)
             return "ON"
 
     def _control_wayland_gnome(self, command):
@@ -94,3 +100,14 @@ class Addon:
             self.bus.send_message(msg)
         except Exception as err:
             logger.error("Error controlling Wayland screen: %s", err)
+
+    def _get_wayland_sway_status(self):
+        stdout, _, _ = syscommand("swaymsg -t get_outputs")
+        try:
+            return "ON" if json.loads(stdout)[0]["dpms"] else "OFF"
+        except Exception as err:
+            logger.error("Error controlling Sway Wayland screen: %s", err)
+            return "ON"
+
+    def _control_wayland_sway(self, command):
+        syscommand(f"swaymsg \"output * dpms {command}\"")
