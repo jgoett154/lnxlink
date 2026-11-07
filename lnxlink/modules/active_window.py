@@ -73,6 +73,16 @@ class Addon:
                 )
             self.get_window = self._get_wayland_kde
 
+        elif session_type == "wayland" and "niri" in desktop_env:
+            _, stderr, returncode = syscommand(
+                ["niri", "--version"], ignore_errors=True
+            )
+            if returncode != 0:
+                raise SystemError(
+                    f"Cannot run niri in this Niri session: {stderr}"
+                )
+            self.get_window = self._get_wayland_niri
+            
         else:
             raise SystemError(f"Session type '{session_type}' not supported")
 
@@ -135,5 +145,27 @@ class Addon:
             return stdout[:255]
         if stderr:
             logger.debug("Error getting KDE Wayland window: %s", stderr)
+        # None skips publishing and would retain the previous window title.
+        return ""
+
+    def _get_wayland_niri(self):
+        try:
+            stdout, stderr, returncode = syscommand(
+                ["niri", "msg", "--json", "windows"],
+                ignore_errors=True,
+                # kdotool bounds its D-Bus calls and must unload its KWin script.
+                timeout=None,
+            )
+        except (OSError, subprocess.SubprocessError) as err:
+            logger.debug("Error getting Niri Wayland window: %s", err)
+            return ""
+        if returncode == 0:
+            data = json.loads(stdout)
+            active_window = list(filter(lambda w: w['is_focused'], data))
+            if len(active_window) > 0:
+                return active_window[0]['title'][:255]
+            return ""
+        if stderr:
+            logger.debug("Error getting Niri Wayland window: %s", stderr)
         # None skips publishing and would retain the previous window title.
         return ""
